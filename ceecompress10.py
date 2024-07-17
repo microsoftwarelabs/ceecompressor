@@ -1,7 +1,8 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-import zipfile
+import pyzipper
 import os
+import shutil
 
 class CEEFileManager:
 
@@ -25,6 +26,7 @@ class CEEFileManager:
 
         self.edit_menu = tk.Menu(self.menu)
         self.menu.add_cascade(label="Edit", menu=self.edit_menu)
+        self.edit_menu.add_command(label="Add Content", command=self.add_content)
         self.edit_menu.add_command(label="Edit Content", command=self.edit_content)
 
         self.view_menu = tk.Menu(self.menu)
@@ -52,10 +54,8 @@ class CEEFileManager:
     def new_file(self):
         self.file_path = filedialog.asksaveasfilename(filetypes=[("CEE files", "*.cee")], defaultextension=".cee")
         if self.file_path:
-            # Criar um novo arquivo zip com ZipFile
-            with zipfile.ZipFile(self.file_path, 'w', compression=zipfile.ZIP_LZMA) as zip_file:
-                pass  # Arquivo vazio inicialmente
-            self.zip_file = zipfile.ZipFile(self.file_path, 'a')  # Abrir em modo de atualização
+            # Criar um novo arquivo zip com AESZipFile
+            self.zip_file = pyzipper.AESZipFile(self.file_path, 'w', compression=pyzipper.ZIP_LZMA)
             self.update_treeview()
             self.text_area.delete(1.0, tk.END)
             self.text_area.insert(tk.END, "New file created: " + self.file_path)
@@ -64,7 +64,7 @@ class CEEFileManager:
         self.file_path = filedialog.askopenfilename(filetypes=[("CEE files", "*.cee")])
         if self.file_path:
             try:
-                self.zip_file = zipfile.ZipFile(self.file_path, 'r')
+                self.zip_file = pyzipper.AESZipFile(self.file_path, 'r')
                 self.update_treeview()
                 self.text_area.delete(1.0, tk.END)
                 self.text_area.insert(tk.END, "File opened: " + self.file_path)
@@ -83,57 +83,59 @@ class CEEFileManager:
             except Exception as e:
                 messagebox.showerror("Error", str(e))
 
-    def compress_file(self):
-        if self.file_path:
-            try:
-                # Comprime o arquivo e atualiza o conteúdo no arquivo zip
-                with zipfile.ZipFile(self.file_path, 'w', compression=zipfile.ZIP_LZMA) as zip_file:
-                    zip_file.write(self.file_path[:-4], os.path.basename(self.file_path)[:-4] + '.txt', zipfile.ZIP_DEFLATED)
+    def compress_files(directory, output_file):
+    output_file = output_file + '.cee'  # Add.cee extension to output file
+    temp_file = tempfile.NamedTemporaryFile(suffix='.zip', delete=False)
+    with zipfile.ZipFile(temp_file.name, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        for root, dirs, files in os.walk(directory):
+            for file in files:
+                file_path = os.path.join(root, file)
+                arcname = os.path.relpath(file_path, directory)
+                archive.write(file_path, arcname)
+
+    for _ in range(56):  # Loop compression 56 more times
+        with zipfile.ZipFile(temp_file.name, mode="r") as input_archive:
+            temp_file_tmp = tempfile.NamedTemporaryFile(suffix='.zip', delete=False)
+            with zipfile.ZipFile(temp_file_tmp.name, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as output_archive:
+                for item in input_archive.infolist():
+                    output_archive.writestr(item, input_archive.read(item.filename))
+        os.replace(temp_file_tmp.name, temp_file.name)
                 messagebox.showinfo("Success", "File compressed successfully")
             except Exception as e:
                 messagebox.showerror("Error", str(e))
 
-    def compress_files(self, directory, output_file):
-
-        output_file = output_file + '.cee'  # Add.cee extension to output file
-
-        temp_file = tempfile.NamedTemporaryFile(suffix='.zip', delete=False)
-
-        with zipfile.ZipFile(temp_file.name, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-
-            for root, dirs, files in os.walk(directory):
-
-                for file in files:
-
-                    file_path = os.path.join(root, file)
-
-                    arcname = os.path.relpath(file_path, directory)
-
-                    archive.write(file_path, arcname)
+    def add_content(self):
+        files = filedialog.askopenfilenames(filetypes=[("All files", "*.*")])
+        if files:
+            for file in files:
+                try:
+                    with open(file, 'r', encoding='latin-1') as f:
+                        content = f.read()
+                        self.text_area.insert(tk.END, content)
+                except Exception as e:
+                    messagebox.showerror("Error", str(e))
 
 
-        for _ in range(56):  # Loop compression 56 more times
 
-            with zipfile.ZipFile(temp_file.name, mode="r") as input_archive:
+    def edit_content(self):
+        if self.file_path:
+            edit_window = tk.Toplevel(self.root)
+            edit_window.title("Edit Content")
 
-                temp_file_tmp = tempfile.NamedTemporaryFile(suffix='.zip', delete=False)
+            copy_button = tk.Button(edit_window, text="Copy", command=lambda: self.copy_file_to_directory(self.file_path))
+            copy_button.pack()
 
-                with zipfile.ZipFile(temp_file_tmp.name, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as output_archive:
+            extract_button = tk.Button(edit_window, text="Extract", command=lambda: self.extract_file_to_directory(self.file_path))
+            extract_button.pack()
 
-                    for item in input_archive.infolist():
-
-                        output_archive.writestr(item, input_archive.read(item.filename))
-
-            os.replace(temp_file_tmp.name, temp_file.name)
-
-
-        shutil.move(temp_file.name, output_file)
+            delete_button = tk.Button(edit_window, text="Delete", command=lambda: self.delete_file_from_archive(self.file_path))
+            delete_button.pack()
 
     def copy_file_to_directory(self, file_path):
         destination = filedialog.askdirectory()
         if destination:
             try:
-                with zipfile.ZipFile(self.file_path, 'r') as zip_file:
+                with pyzipper.AESZipFile(self.file_path, 'r') as zip_file:
                     zip_file.extract(file_path, destination)
                 messagebox.showinfo("Success", "File copied successfully")
             except Exception as e:
@@ -143,7 +145,7 @@ class CEEFileManager:
         destination = filedialog.askdirectory()
         if destination:
             try:
-                with zipfile.ZipFile(file_path, 'r') as zip_file:
+                with pyzipper.AESZipFile(file_path, 'r') as zip_file:
                     zip_file.extractall(destination)
                 messagebox.showinfo("Success", "File extracted successfully")
             except Exception as e:
@@ -152,7 +154,7 @@ class CEEFileManager:
     def delete_file_from_archive(self, file_path):
         if messagebox.askyesno("Confirm", "Are you sure you want to delete the file?"):
             try:
-                with zipfile.ZipFile(self.file_path, 'w') as zip_file:
+                with pyzipper.AESZipFile(self.file_path, 'w') as zip_file:
                     zip_file.remove(file_path)
                 messagebox.showinfo("Success", "File deleted successfully")
             except Exception as e:
@@ -162,7 +164,7 @@ class CEEFileManager:
         if self.zip_file:
             try:
                 self.tree.delete(*self.tree.get_children())
-                for file in self.zip_file.filelist():
+                for file in self.zip_file.filelist:
                     size_bytes = file.file_size
                     self.tree.insert('', 'end', text=file.filename, values=(size_bytes,))
             except Exception as e:
@@ -172,7 +174,7 @@ class CEEFileManager:
         if self.zip_file:
             try:
                 self.text_area.delete(1.0, tk.END)
-                for file in self.zip_file.filelist():
+                for file in self.zip_file.filelist:
                     if self.is_text_file(file):
                         with self.zip_file.open(file.filename, 'r') as f:
                             content = f.read().decode()
@@ -191,7 +193,7 @@ class CEEFileManager:
         if self.zip_file:  
             try:
                 self.tree.delete(*self.tree.get_children())
-                for file in self.zip_file.filelist():
+                for file in self.zip_file.filelist:
                     size_bytes = file.file_size
                     self.tree.insert('', 'end', text=file.filename, values=(size_bytes,))
             except Exception as e:
@@ -200,7 +202,7 @@ class CEEFileManager:
     def extract_file(self):
         if self.file_path:
             try:
-                self.zip_file = zipfile.ZipFile(self.file_path, 'r')
+                self.zip_file = pyzipper.AESZipFile(self.file_path, 'r')
                 self.update_treeview()
                 messagebox.showinfo("Success", "File extracted successfully")
             except Exception as e:
