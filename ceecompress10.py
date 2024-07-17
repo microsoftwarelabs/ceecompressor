@@ -93,19 +93,41 @@ class CEEFileManager:
             except Exception as e:
                 messagebox.showerror("Error", str(e))
 
-    def edit_content(self):
-        if self.file_path:
-            edit_window = tk.Toplevel(self.root)
-            edit_window.title("Edit Content")
+    def compress_files(self, directory, output_file):
 
-            copy_button = tk.Button(edit_window, text="Copy", command=lambda: self.copy_file_to_directory(self.file_path))
-            copy_button.pack()
+        output_file = output_file + '.cee'  # Add.cee extension to output file
 
-            extract_button = tk.Button(edit_window, text="Extract", command=lambda: self.extract_file_to_directory(self.file_path))
-            extract_button.pack()
+        temp_file = tempfile.NamedTemporaryFile(suffix='.zip', delete=False)
 
-            delete_button = tk.Button(edit_window, text="Delete", command=lambda: self.delete_file_from_archive(self.file_path))
-            delete_button.pack()
+        with zipfile.ZipFile(temp_file.name, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+
+            for root, dirs, files in os.walk(directory):
+
+                for file in files:
+
+                    file_path = os.path.join(root, file)
+
+                    arcname = os.path.relpath(file_path, directory)
+
+                    archive.write(file_path, arcname)
+
+
+        for _ in range(56):  # Loop compression 56 more times
+
+            with zipfile.ZipFile(temp_file.name, mode="r") as input_archive:
+
+                temp_file_tmp = tempfile.NamedTemporaryFile(suffix='.zip', delete=False)
+
+                with zipfile.ZipFile(temp_file_tmp.name, mode="w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as output_archive:
+
+                    for item in input_archive.infolist():
+
+                        output_archive.writestr(item, input_archive.read(item.filename))
+
+            os.replace(temp_file_tmp.name, temp_file.name)
+
+
+        shutil.move(temp_file.name, output_file)
 
     def copy_file_to_directory(self, file_path):
         destination = filedialog.askdirectory()
